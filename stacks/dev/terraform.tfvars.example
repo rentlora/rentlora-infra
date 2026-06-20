@@ -1,0 +1,6 @@
+# Copy to terraform.tfvars and adjust for your environment.
+region              = "us-east-1"
+env                 = "dev"
+namespace           = "rentlora-dev"
+deletion_protection = false   # dev: allow teardown
+skip_final_snapshot = true    # dev: no final RDS snapshot

@@ -1,20 +1,21 @@
+# Configuration is supplied via terraform.tfvars (no hardcoded defaults).
 variable "region" {
-  type    = string
-  default = "us-east-1"
+  type        = string
+  description = "AWS region for all resources."
 }
 variable "cluster_name" {
-  type    = string
-  default = "rentlora-eks"
+  type        = string
+  description = "EKS cluster name; also used for discovery tags and resource naming."
 }
 variable "domain_name" {
-  type    = string
-  default = "rentlora.in"
+  type        = string
+  description = "Public domain managed in Route53 (ACM cert + external-dns)."
 }
 variable "github_org" {
-  type    = string
-  default = "rentlora"
+  type        = string
+  description = "GitHub org that owns the repos (used for the OIDC trust subject)."
 }
 variable "github_repo" {
-  type    = string
-  default = "rentlora"
+  type        = string
+  description = "Primary GitHub repo name."
 }

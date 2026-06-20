@@ -3,13 +3,13 @@ data "terraform_remote_state" "cluster" {
   config = {
     bucket = "rentlora-terraform-state"
     key    = "cluster/terraform.tfstate"
-    region = "us-east-1"
+    region = var.region
   }
 }
 
 locals {
-  env       = "dev"
-  namespace = "rentlora-dev"
+  env       = var.env
+  namespace = var.namespace
 
   cluster = data.terraform_remote_state.cluster.outputs
 }
@@ -19,8 +19,8 @@ module "rds" {
   env                  = local.env
   db_subnet_group_name = local.cluster.db_subnet_group_name
   vpc_id               = local.cluster.vpc_id
-  deletion_protection  = false
-  skip_final_snapshot  = true
+  deletion_protection  = var.deletion_protection
+  skip_final_snapshot  = var.skip_final_snapshot
 }
 
 module "sqs" {

@@ -15,10 +15,13 @@ tfplan
 
 # Provider lock files ARE committed (pin versions) — do not ignore .terraform.lock.hcl
 
-# tfvars may hold environment config — commit only the example template
-*.tfvars
-*.tfvars.json
-!*.tfvars.example
+# terraform.tfvars here holds only non-sensitive config (region, names, domain) and IS
+# committed so the config is the single source of truth. Keep auto-loaded and any
+# secret-bearing tfvars out of git.
+*.auto.tfvars
+*.auto.tfvars.json
+secret*.tfvars
+*-secrets.tfvars
 
 # Secrets / local env
 .env

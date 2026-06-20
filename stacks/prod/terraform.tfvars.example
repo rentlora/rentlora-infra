@@ -1,0 +1,6 @@
+# Copy to terraform.tfvars and adjust for your environment.
+region              = "us-east-1"
+env                 = "prod"
+namespace           = "production"
+deletion_protection = true    # prod: protect the database
+skip_final_snapshot = false   # prod: always take a final RDS snapshot

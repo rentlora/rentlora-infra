@@ -1,0 +1,5 @@
+region       = "us-east-1"
+cluster_name = "rentlora-eks"
+domain_name  = "rentlora.in"
+github_org   = "rentlora"
+github_repo  = "rentlora"

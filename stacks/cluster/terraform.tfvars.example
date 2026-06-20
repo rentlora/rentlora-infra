@@ -1,0 +1,6 @@
+# Copy to terraform.tfvars and adjust for your environment.
+region       = "us-east-1"
+cluster_name = "rentlora-eks"
+domain_name  = "rentlora.in"     # must be a domain you own (Route53 + ACM)
+github_org   = "rentlora"        # GitHub org for the OIDC trust
+github_repo  = "rentlora"
