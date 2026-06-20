@@ -1,0 +1,10 @@
+variable "cluster_name" { type = string }
+variable "env" { type = string }
+variable "namespace" { type = string }
+variable "oidc_provider_arn" { type = string }
+variable "oidc_provider" { type = string }
+variable "property_sync_queue_arn" { type = string }
+variable "booking_events_queue_arn" { type = string }
+variable "images_bucket_arn" { type = string }
+variable "secrets_path_arn" { type = string } # arn for /rentlora/{env}/* secrets
+variable "ssm_path_arn" { type = string }     # arn for /rentlora/{env}/* params

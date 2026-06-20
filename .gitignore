@@ -1,0 +1,26 @@
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+plan.txt
+tfplan
+
+# Provider lock files ARE committed (pin versions) — do not ignore .terraform.lock.hcl
+
+# tfvars may hold environment config — commit only the example template
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+
+# Secrets / local env
+.env
+*.pem
+*.key
