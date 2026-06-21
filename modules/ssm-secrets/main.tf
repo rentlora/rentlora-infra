@@ -9,8 +9,9 @@ resource "aws_secretsmanager_secret" "jwt_secret" {
 }
 
 resource "aws_secretsmanager_secret_version" "jwt_secret" {
-  secret_id     = aws_secretsmanager_secret.jwt_secret.id
-  secret_string = jsonencode({ secret = random_password.jwt_secret.result })
+  secret_id = aws_secretsmanager_secret.jwt_secret.id
+  # Stored as the raw value (not JSON) — services read SecretString directly.
+  secret_string = random_password.jwt_secret.result
 }
 
 locals {
