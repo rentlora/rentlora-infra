@@ -85,6 +85,16 @@ resource "aws_iam_role_policy" "karpenter" {
         Effect   = "Allow"
         Action   = ["eks:DescribeCluster"]
         Resource = "arn:aws:eks:${var.region}:${local.account_id}:cluster/${var.cluster_name}"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "sqs:DeleteMessage",
+          "sqs:GetQueueUrl",
+          "sqs:GetQueueAttributes",
+          "sqs:ReceiveMessage",
+        ]
+        Resource = aws_sqs_queue.karpenter_interruption.arn
       }
     ]
   })
@@ -236,13 +246,21 @@ resource "aws_sqs_queue_policy" "karpenter_interruption" {
   })
 }
 
-resource "helm_release" "kgateway" {
-  name             = "kgateway"
-  repository       = "https://kgateway-dev.github.io/kgateway"
-  chart            = "kgateway"
+resource "helm_release" "kgateway_crds" {
+  name             = "kgateway-crds"
+  chart            = "oci://cr.kgateway.dev/kgateway-dev/charts/kgateway-crds"
   namespace        = "kgateway-system"
-  version          = "2.0.0"
+  version          = "v2.0.0"
   create_namespace = true
+}
+
+resource "helm_release" "kgateway" {
+  name      = "kgateway"
+  chart     = "oci://cr.kgateway.dev/kgateway-dev/charts/kgateway"
+  namespace = "kgateway-system"
+  version   = "v2.0.0"
+
+  depends_on = [helm_release.kgateway_crds]
 }
 
 resource "helm_release" "metrics_server" {
