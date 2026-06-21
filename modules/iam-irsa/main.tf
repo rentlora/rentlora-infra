@@ -125,5 +125,15 @@ locals {
     "admin-service" = {
       statements = [] # DB only; common_statements cover secrets + SSM
     }
+
+    "user-service" = {
+      statements = [
+        {
+          Effect   = "Allow"
+          Action   = ["ses:SendEmail", "ses:SendRawEmail"]
+          Resource = "*"
+        }
+      ]
+    }
   }
 }

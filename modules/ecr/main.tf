@@ -6,6 +6,7 @@ locals {
     "ai-service",
     "admin-service",
     "ai-search-service",
+    "user-service",
   ]
 }
 
