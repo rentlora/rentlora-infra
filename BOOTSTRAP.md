@@ -41,19 +41,41 @@ Creates VPC, EKS, ECR, the **OIDC provider + `rentlora-eks-ci` role**, ACM cert,
 zone, and installs the platform addons (ArgoCD, kgateway, Karpenter, external-dns,
 metrics-server, AWS LB controller).
 
+**Do this in two phases** so the apply doesn't hang on certificate validation. The ACM cert
+validates via DNS, which only works once the domain is delegated to the new Route53 zone —
+but you only get the zone's nameservers *after* it's created. So: create the zone, delegate,
+then finish.
+
+### 2a. Create the Route53 zone first, read its nameservers
+
 ```bash
 cd ../../stacks/cluster
 terraform init      # uses the S3 backend created in step 1
+terraform apply -target=module.dns_tls.aws_route53_zone.main
+terraform output route53_name_servers     # 4 × ns-xxx.awsdns-xx.{com,net,org,co.uk}
+```
+
+### 2b. Delegate the domain at GoDaddy (registrar for rentlora.in)
+
+1. GoDaddy → **Domain Portfolio** → click **rentlora.in**
+2. **Nameservers → Change → "I'll use my own nameservers"** (Enter my own / advanced)
+3. Replace with the **4 Route53 values** (drop any trailing dot) → Save
+4. Verify it propagated (minutes–couple hours):
+   ```bash
+   dig +short NS rentlora.in     # should return the awsdns... servers, not GoDaddy's
+   ```
+
+This is a **full-domain delegation** — Route53 becomes authoritative for `rentlora.in`, so
+`external-dns` can later create `dev.rentlora.in` / `rentlora.in` records for the NLB.
+
+### 2c. Full apply (ACM validation now completes)
+
+```bash
 terraform apply
 ```
 
-> ⚠️ **If apply hangs on `aws_acm_certificate_validation`** it's DNS delegation. The
-> Route53 zone is created here, but ACM can only validate once the public internet resolves
-> `rentlora.in` to *this* zone. Take the name servers from the output and set them at your
-> domain registrar, then re-run `terraform apply`:
-> ```bash
-> terraform output route53_name_servers
-> ```
+> ⚠️ If apply still hangs on `aws_acm_certificate_validation`, DNS hasn't propagated yet —
+> re-check `dig +short NS rentlora.in`, wait, then re-run `terraform apply`.
 
 ## Step 3 — Dev and Prod stacks
 
@@ -75,23 +97,30 @@ kubectl get nodes        # should show the 2 system nodes
 
 ## Step 5 — Fill the Helm placeholders (in `rentlora-helm`)
 
-The chart env values + gateway carry `<ACCOUNT_ID>` / `<ACM_CERT_ARN>` placeholders.
-Pull the real values from Terraform outputs:
+The chart env values + gateway carry `<ACCOUNT_ID>` / `<ACM_CERT_ARN>` placeholders (the ECR
+region and IRSA role names are already correct in the templates — only these two need filling).
+
+**One command** — the helper reads the Terraform outputs and patches all three files:
+
+```bash
+cd ../../rentlora-helm        # or wherever rentlora-helm is checked out
+scripts/fill-values.sh        # pass the infra path as arg 1 if not a sibling dir
+git diff                      # review
+git commit -am "fill account id + ACM arn from terraform outputs" && git push
+```
+
+It patches `environments/dev/values.yaml`, `environments/prod/values.yaml`, and
+`gateway/gatewayparameters.yaml`. Once pushed, ArgoCD picks up the values.
+
+<details><summary>Manual alternative</summary>
 
 ```bash
 # from rentlora-infra/stacks/cluster
-terraform output -raw ecr_registry        # <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com
-terraform output -raw acm_cert_arn         # <ACM_CERT_ARN>  (gateway/gatewayparameters.yaml)
-
-# from rentlora-infra/stacks/dev  (and stacks/prod for prod values)
-terraform output -json irsa_role_arns      # per-service IRSA role ARNs
+terraform output -raw ecr_registry    # account id is the first segment
+terraform output -raw acm_cert_arn
 ```
-
-Edit in `rentlora-helm`:
-- `environments/dev/values.yaml` + `environments/prod/values.yaml` → `global.ecrRegistry`, `irsaRoleArns`
-- `gateway/gatewayparameters.yaml` → `<ACM_CERT_ARN>`
-
-Commit + push to `rentlora-helm` (ArgoCD picks it up).
+Replace `<ACCOUNT_ID>` and `<ACM_CERT_ARN>` in the three files above.
+</details>
 
 ## Step 6 — Apply the cluster-scoped GitOps resources
 
