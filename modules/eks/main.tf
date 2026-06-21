@@ -12,10 +12,13 @@ module "eks" {
 
   # EKS managed addons — AWS handles patching
   cluster_addons = {
-    vpc-cni                         = { most_recent = true }
-    coredns                         = { most_recent = true }
-    kube-proxy                      = { most_recent = true }
-    aws-ebs-csi-driver              = { most_recent = true }
+    vpc-cni    = { most_recent = true }
+    coredns    = { most_recent = true }
+    kube-proxy = { most_recent = true }
+    aws-ebs-csi-driver = {
+      most_recent              = true
+      service_account_role_arn = aws_iam_role.ebs_csi.arn
+    }
     amazon-cloudwatch-observability = { most_recent = true }
     eks-pod-identity-agent          = { most_recent = true }
   }
@@ -62,4 +65,30 @@ module "eks" {
   node_security_group_tags = {
     "karpenter.sh/discovery" = var.cluster_name
   }
+}
+
+# IRSA role for the EBS CSI driver controller. The driver needs permission to
+# create/attach/detach EBS volumes; without this its controller pods crashloop.
+resource "aws_iam_role" "ebs_csi" {
+  name = "${var.cluster_name}-ebs-csi"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Federated = module.eks.oidc_provider_arn }
+      Action    = "sts:AssumeRoleWithWebIdentity"
+      Condition = {
+        StringEquals = {
+          "${replace(module.eks.oidc_provider, "https://", "")}:sub" = "system:serviceaccount:kube-system:ebs-csi-controller-sa"
+          "${replace(module.eks.oidc_provider, "https://", "")}:aud" = "sts.amazonaws.com"
+        }
+      }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "ebs_csi" {
+  role       = aws_iam_role.ebs_csi.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
 }
