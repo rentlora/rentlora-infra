@@ -72,6 +72,7 @@ resource "aws_iam_role_policy" "karpenter" {
           "ec2:DescribeSecurityGroups", "ec2:DescribeSubnets",
           "ec2:DescribeInstanceTypes", "ec2:DescribeInstanceTypeOfferings",
           "ec2:DescribeAvailabilityZones", "ec2:DescribeSpotPriceHistory",
+          "ec2:DescribeImages",
           "pricing:GetProducts", "ssm:GetParameter"
         ]
         Resource = "*"
