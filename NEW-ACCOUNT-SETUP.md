@@ -235,6 +235,21 @@ These bit us on the first run and are **now committed**, so a fresh account won'
 | **trivy-action version** | `Unable to resolve action aquasecurity/trivy-action@0.24.0` | pinned to `@master` in build-scan-push + terraform-apply |
 | **pytest import error** | `starlette.testclient requires httpx` | `pip install ... httpx` in `.github/actions/python-checks` |
 | **HCL semicolons / config drift** | `terraform fmt/validate` failures | all stacks multi-line + `terraform.tfvars`-driven, no hardcoded defaults |
+| **Karpenter "Failed to resolve AMIs"** | nodeclaims `LaunchFailed`, `UnauthorizedOperation: ec2:DescribeImages` | added `ec2:DescribeImages` to karpenter policy in `modules/addons/main.tf` |
+| **Karpenter wants to make its own instance profile** | `iam:GetInstanceProfile`/`CreateInstanceProfile` AccessDenied | `EC2NodeClass` uses `instanceProfile:` (the TF-created one) instead of `role:` in `karpenter/ec2nodeclass.yaml` |
+| **Karpenter nodes boot but never `Ready`** | NodeClaims `Registered=False`; role not authorized | `aws_eks_access_entry` (type `EC2_LINUX`) for the karpenter node role in `modules/addons/main.tf` |
+| **App can't reach RDS** | `asyncpg ... no pg_hba.conf entry ... no encryption` | RDS PG15 forces SSL; services connect with `connect_args={"ssl":"require"}` in each `database.py` |
+| **DB password auth fails** | `InvalidPasswordError for user "postgres"` (password was correct) | secrets were JSON-wrapped but services read `SecretString` raw → store **raw** in `modules/rds` + `modules/ssm-secrets` |
+| **property-service crashloop** | `ParameterNotFound` for `/rentlora/<env>/s3-image-bucket` | SSM param **keys renamed to match service config.py** (flat names, not `service/`,`ai/`,`sqs/` prefixes) in `modules/ssm-secrets/main.tf` |
+| **frontend `CreateContainerConfigError`** | `runAsNonRoot ... image has non-numeric user (nginx)` | pin `runAsUser: 101` / `runAsGroup: 101` (nginx-unprivileged) in `charts/frontend` |
+
+> **SSM param naming is load-bearing.** The services read exact flat keys
+> (`s3-image-bucket`, `cloudfront-domain`, `property-sync-queue-url`,
+> `booking-events-queue-url`, `bedrock-nova-model-id`, `bedrock-embedding-model-id`,
+> `ai-search-service-url`, `booking-service-url`). If you change a key in
+> `modules/ssm-secrets` it MUST match the service's `config.py` or that service
+> crashes on startup (`ParameterNotFound`). `internal-alb-dns` is read with a
+> fallback (`_param(..., "")`) so it's optional.
 
 > ⚠️ **Two timing caveats** (fixed in code but eventual-consistency can still nag): the EBS
 > CSI and Karpenter IRSA roles now exist *before* their pods, so the controllers come up
@@ -259,6 +274,46 @@ These are **not** in Terraform/Helm — you must do them every new account/clust
    `terraform apply`.
 7. **App-runtime AWS enablement** — Bedrock model access (AI service) and SES sender
    verification (booking emails) are **console toggles**, not Terraform.
+8. **Check org SCPs FIRST** (see §10b) — if the account is in an Organization, an SCP
+   may deny EC2 launches / restrict instance types, which forces the Karpenter NodePool
+   shape. This is the single most disruptive surprise on a managed/sandbox account.
+
+---
+
+## 10b. 🚨 Org Service Control Policies (SCPs) — check FIRST on a new account
+
+If the new account is a **member of an AWS Organization**, an SCP in the management
+account can silently override every IAM allow. We hit this hard: Karpenter's
+`ec2:RunInstances` was denied by SCP `p-rn6vr8ok` even though IAM allowed it.
+
+**Check up front:**
+```bash
+aws organizations describe-organization --query 'Organization.[Id,MasterAccountId]' --output text
+# if this returns an org with a MasterAccountId != your account, SCPs may apply
+```
+
+**Symptom:** Karpenter NodeClaims stay `Launched=False` with
+`UnauthorizedOperation ... with an explicit deny in a service control policy`.
+The managed node group still works (it launches via the AutoScaling service-linked
+role, which the SCP usually exempts).
+
+**Diagnose the exact condition** (decode the auth-failure context from the karpenter log):
+```bash
+aws sts decode-authorization-message --encoded-message "<blob from the error>" --query DecodedMessage --output text
+```
+
+**This account's constraint (280646578520 under org 389226936417):** the SCP allows
+**only on-demand `t3.medium`**. So `karpenter/nodepool.yaml` is pinned to:
+```yaml
+- key: karpenter.sh/capacity-type
+  values: ["on-demand"]          # no spot
+- key: node.kubernetes.io/instance-type
+  values: ["t3.medium"]          # only this type
+```
+On a **different account without that SCP**, you can widen the NodePool back to
+spot + multiple instance types for cost/efficiency. On an account with a *different*
+SCP, match whatever the SCP permits (read it / decode the failure, then set the
+NodePool requirements accordingly).
 
 ---
 
