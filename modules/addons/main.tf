@@ -132,6 +132,16 @@ resource "aws_iam_role_policy_attachment" "karpenter_node_ssm" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+# Authorize Karpenter-launched nodes to join the cluster. The cluster uses EKS
+# access entries (API auth); managed node groups get this automatically, but
+# Karpenter's node role needs an explicit EC2_LINUX entry or kubelets register
+# as Unauthorized and the NodeClaims never become Ready.
+resource "aws_eks_access_entry" "karpenter_node" {
+  cluster_name  = var.cluster_name
+  principal_arn = aws_iam_role.karpenter_node.arn
+  type          = "EC2_LINUX"
+}
+
 resource "aws_iam_instance_profile" "karpenter_node" {
   name = "${var.cluster_name}-karpenter-node"
   role = aws_iam_role.karpenter_node.name
