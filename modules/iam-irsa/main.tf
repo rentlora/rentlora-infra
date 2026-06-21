@@ -80,9 +80,13 @@ locals {
           Resource = var.property_sync_queue_arn
         },
         {
-          Effect   = "Allow"
-          Action   = ["bedrock:InvokeModel"]
-          Resource = "arn:aws:bedrock:*::foundation-model/amazon.titan-embed-text-v2:0"
+          Effect = "Allow"
+          Action = ["bedrock:InvokeModel"]
+          # Titan to embed the query + Nova to summarize/rank the results.
+          Resource = [
+            "arn:aws:bedrock:*::foundation-model/amazon.titan-embed-text-v2:0",
+            "arn:aws:bedrock:*::foundation-model/amazon.nova-lite-v1:0"
+          ]
         }
       ]
     }
