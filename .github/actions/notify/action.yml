@@ -1,0 +1,41 @@
+name: notify
+description: >
+  Post a success/failure message to a Slack incoming webhook. No-op (does not fail)
+  if no webhook URL is configured, so the pipeline still works without Slack set up.
+
+inputs:
+  status:
+    description: "success | failure"
+    required: true
+  title:
+    description: Short headline for the message.
+    required: true
+  webhook-url:
+    description: Slack incoming webhook URL (pass secrets.SLACK_WEBHOOK_URL).
+    required: true
+  details:
+    description: Optional extra context line.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Post to Slack
+      shell: bash
+      env:
+        WEBHOOK: ${{ inputs.webhook-url }}
+        STATUS: ${{ inputs.status }}
+        TITLE: ${{ inputs.title }}
+        DETAILS: ${{ inputs.details }}
+      run: |
+        if [ -z "${WEBHOOK}" ]; then
+          echo "SLACK_WEBHOOK_URL not set — skipping notification."
+          exit 0
+        fi
+        if [ "${STATUS}" = "success" ]; then ICON=":white_check_mark:"; else ICON=":x:"; fi
+        RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+        TEXT="${ICON} *${TITLE}* — \`${STATUS}\`\nRepo: ${GITHUB_REPOSITORY}@${GITHUB_REF_NAME}\nRun: ${RUN_URL}"
+        if [ -n "${DETAILS}" ]; then TEXT="${TEXT}\n${DETAILS}"; fi
+        payload=$(jq -nc --arg t "${TEXT}" '{text: $t}')
+        curl -fsS -X POST -H 'Content-type: application/json' --data "${payload}" "${WEBHOOK}"
