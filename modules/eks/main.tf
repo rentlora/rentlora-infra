@@ -12,7 +12,18 @@ module "eks" {
 
   # EKS managed addons — AWS handles patching
   cluster_addons = {
-    vpc-cni    = { most_recent = true }
+    # Prefix delegation: each ENI hands out /28 IPv4 prefixes instead of single
+    # secondary IPs, so a node can run far more pods. Lets Karpenter pack pods
+    # onto fewer/smaller nodes (cost), and avoids IP exhaustion on t3.small.
+    vpc-cni = {
+      most_recent = true
+      configuration_values = jsonencode({
+        env = {
+          ENABLE_PREFIX_DELEGATION = "true"
+          WARM_PREFIX_TARGET       = "1"
+        }
+      })
+    }
     coredns    = { most_recent = true }
     kube-proxy = { most_recent = true }
     aws-ebs-csi-driver = {
@@ -30,9 +41,14 @@ module "eks" {
   # Karpenter then scales additional nodes for application pods on top of this group.
   eks_managed_node_groups = {
     system = {
-      instance_types = ["t3.medium"]
+      # AWS Free Tier plan only permits free-tier-eligible instance types
+      # (t3.medium is refused). c7i-flex.large = 2 vCPU / 4 GiB is the chosen
+      # platform node. 2 nodes = 4 vCPU, within the default 5-vCPU On-Demand
+      # Standard quota; max stays at 2 so it can't exceed it. Karpenter scales
+      # application nodes on top of this group.
+      instance_types = ["c7i-flex.large"]
       min_size       = 2
-      max_size       = 3
+      max_size       = 2
       desired_size   = 2
 
       labels = {
@@ -91,4 +107,35 @@ resource "aws_iam_role" "ebs_csi" {
 resource "aws_iam_role_policy_attachment" "ebs_csi" {
   role       = aws_iam_role.ebs_csi.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+}
+
+# CloudWatch Observability addon needs IAM to publish: Fluent Bit -> CloudWatch Logs
+# and the agent -> Container Insights metrics. Granted via EKS Pod Identity (the
+# eks-pod-identity-agent addon is enabled) to the addon's `cloudwatch-agent` SA, so
+# both the agent and Fluent Bit DaemonSets (same SA) get credentials. Without this
+# the pods run but get AccessDenied. CloudWatchAgentServerPolicy covers PutMetricData
+# + Create/PutLogEvents.
+resource "aws_iam_role" "cloudwatch_observability" {
+  name = "${var.cluster_name}-cloudwatch-observability"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "pods.eks.amazonaws.com" }
+      Action    = ["sts:AssumeRole", "sts:TagSession"]
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "cloudwatch_observability" {
+  role       = aws_iam_role.cloudwatch_observability.name
+  policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+}
+
+resource "aws_eks_pod_identity_association" "cloudwatch_observability" {
+  cluster_name    = var.cluster_name
+  namespace       = "amazon-cloudwatch"
+  service_account = "cloudwatch-agent"
+  role_arn        = aws_iam_role.cloudwatch_observability.arn
 }
