@@ -40,7 +40,7 @@ resource "aws_db_instance" "postgres" {
   publicly_accessible    = false
 
   multi_az                  = false
-  backup_retention_period   = 7
+  backup_retention_period   = 0 # Free Plan caps backups; 0 = no automated backups (raise after upgrading to a paid plan)
   deletion_protection       = var.deletion_protection
   skip_final_snapshot       = var.skip_final_snapshot
   final_snapshot_identifier = var.skip_final_snapshot ? null : "rentlora-${var.env}-final"
