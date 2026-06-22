@@ -17,6 +17,12 @@ module "dns_tls" {
   domain_name = var.domain_name
 }
 
+module "alarms" {
+  source       = "../../modules/alarms"
+  cluster_name = var.cluster_name
+  alert_email  = var.alert_email
+}
+
 module "ecr" {
   source       = "../../modules/ecr"
   cluster_name = var.cluster_name

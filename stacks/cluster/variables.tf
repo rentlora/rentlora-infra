@@ -19,3 +19,7 @@ variable "github_repo" {
   type        = string
   description = "Primary GitHub repo name."
 }
+variable "alert_email" {
+  type        = string
+  description = "Email that receives CloudWatch alarm notifications (must be confirmed after apply)."
+}
