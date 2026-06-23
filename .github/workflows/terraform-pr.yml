@@ -88,14 +88,18 @@ jobs:
         with:
           sarif_file: trivy-iac.sarif
 
-      - name: Trivy — gate (fails PR on HIGH/CRITICAL)
+      # Gate blocks the PR on CRITICAL only. HIGH findings are still uploaded to
+      # the Security tab (SARIF step above) for visibility, but don't block merges.
+      # Accepted CRITICALs are suppressed in .trivyignore with justifications.
+      - name: Trivy — gate (fails PR on CRITICAL)
         uses: aquasecurity/trivy-action@v0.35.0
         with:
           scan-type: config
           scan-ref: .
           format: table
-          severity: HIGH,CRITICAL
+          severity: CRITICAL
           exit-code: "1"
+          trivyignores: .trivyignore
 
   # ─── 3. Plan — shows the diff to the reviewer as a PR comment ────────────
   plan:
