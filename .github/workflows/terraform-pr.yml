@@ -145,36 +145,39 @@ jobs:
           header: plan-${{ matrix.stack }}
           path: comment.md
 
-      # Cost estimate — informational only (continue-on-error so a cost-tooling
-      # hiccup never blocks an infra merge). Only runs when the plan succeeded.
+      # Cost estimate — fully self-contained. INFRACOST_SKIP_UPLOAD stops the push
+      # to Infracost Cloud, so there is NO external "Infracost" status check; the
+      # API key is still used locally for pricing. The estimate is published as a
+      # table in the job summary and a sticky PR comment. Informational only
+      # (continue-on-error so a cost-tooling hiccup never blocks an infra merge).
       - name: Setup Infracost
         if: steps.plan.outcome == 'success'
         uses: infracost/actions/setup@v3
         with:
           api-key: ${{ secrets.INFRACOST_API_KEY }}
 
-      # `infracost comment` needs an Infracost-generated JSON, not a raw
-      # `terraform show -json`. Generate it from the plan json first.
-      - name: Infracost breakdown
+      - name: Infracost estimate
         if: steps.plan.outcome == 'success'
         continue-on-error: true
+        env:
+          INFRACOST_SKIP_UPLOAD: "true"
         run: |
-          infracost breakdown \
-            --path stacks/${{ matrix.stack }}/plan.json \
-            --format json \
-            --out-file infracost.json
+          infracost breakdown --path stacks/${{ matrix.stack }}/plan.json --format table | tee infracost.txt
+          {
+            echo "## 💰 Infracost estimate — \`${{ matrix.stack }}\`"
+            echo ""
+            echo '```'
+            cat infracost.txt
+            echo '```'
+          } | tee cost.md >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Post Infracost PR comment
+      - name: Post cost as PR comment
         if: steps.plan.outcome == 'success'
         continue-on-error: true
-        run: |
-          infracost comment github \
-            --path infracost.json \
-            --repo "$GITHUB_REPOSITORY" \
-            --github-token ${{ secrets.GITHUB_TOKEN }} \
-            --pull-request ${{ github.event.pull_request.number }} \
-            --behavior update \
-            --tag infracost-${{ matrix.stack }}
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: cost-${{ matrix.stack }}
+          path: cost.md
 
   # ─── 4. PR gate — single status check for branch protection ──────────────
   iac-checks:
