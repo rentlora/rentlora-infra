@@ -118,7 +118,8 @@ jobs:
         id: plan
         run: |
           set -o pipefail
-          terraform plan -no-color 2>&1 | tee plan.txt
+          terraform plan -no-color -out=tfplan 2>&1 | tee plan.txt
+          terraform show -json tfplan > plan.json
         working-directory: stacks/${{ matrix.stack }}
 
       - name: Create comment body
@@ -139,6 +140,21 @@ jobs:
         with:
           header: plan-${{ matrix.stack }}
           path: comment.md
+
+      - name: Setup Infracost
+        uses: infracost/actions/setup@v3
+        with:
+          api-key: ${{ secrets.INFRACOST_API_KEY }}
+
+      - name: Post Infracost PR comment
+        run: |
+          infracost comment github \
+            --path stacks/${{ matrix.stack }}/plan.json \
+            --repo $GITHUB_REPOSITORY \
+            --github-token ${{ secrets.GITHUB_TOKEN }} \
+            --pull-request ${{ github.event.pull_request.number }} \
+            --behavior update \
+            --tag infracost-${{ matrix.stack }}
 
   # ─── 4. PR gate — single status check for branch protection ──────────────
   iac-checks:
