@@ -22,7 +22,7 @@ module "rds" {
   deletion_protection     = var.deletion_protection
   skip_final_snapshot     = var.skip_final_snapshot
   backup_retention_period = 1     # dev: 1 day of PITR is enough
-  multi_az                = false # dev: single-AZ (cost)
+  multi_az                = false # dev: single-AZ (cost )
 }
 
 module "sqs" {
