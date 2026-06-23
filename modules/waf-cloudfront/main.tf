@@ -78,12 +78,27 @@ resource "aws_wafv2_web_acl" "cf" {
   }
 }
 
+# WAF logging — so you can see what got blocked/allowed, not just counts.
+# CLOUDFRONT-scope WAF logs must go to a us-east-1 log group whose name starts
+# with the reserved "aws-waf-logs-" prefix.
+resource "aws_cloudwatch_log_group" "waf" {
+  name              = "aws-waf-logs-rentlora-cloudfront"
+  retention_in_days = 30
+}
+
+resource "aws_wafv2_web_acl_logging_configuration" "cf" {
+  log_destination_configs = [aws_cloudwatch_log_group.waf.arn]
+  resource_arn            = aws_wafv2_web_acl.cf.arn
+}
+
 resource "aws_cloudfront_distribution" "app" {
   enabled         = true
   is_ipv6_enabled = true
   comment         = "rentlora prod — WAF + frontend edge cache"
   aliases         = [var.domain_name]
   web_acl_id      = aws_wafv2_web_acl.cf.arn
+  # NA + Europe edge locations only — cheaper than the global default (All).
+  price_class = "PriceClass_100"
 
   origin {
     domain_name = var.origin_domain
