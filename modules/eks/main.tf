@@ -18,6 +18,9 @@ module "eks" {
     vpc-cni = {
       most_recent = true
       configuration_values = jsonencode({
+        # Enable Kubernetes NetworkPolicy enforcement (runs the aws-network-policy
+        # agent on each node). Without this, NetworkPolicy objects are ignored.
+        enableNetworkPolicy = "true"
         env = {
           ENABLE_PREFIX_DELEGATION = "true"
           WARM_PREFIX_TARGET       = "1"
