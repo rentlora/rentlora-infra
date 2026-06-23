@@ -76,7 +76,7 @@ resource "aws_iam_openid_connect_provider" "github" {
 #   - CI role CANNOT remove its own boundary or another role's boundary
 resource "aws_iam_policy" "ci_boundary" {
   name        = "rentlora-ci-boundary"
-  description = "Permission boundary for rentlora-eks-ci — prevents IAM privilege escalation"
+  description = "Permission boundary for rentlora-eks-ci - prevents IAM privilege escalation"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -131,6 +131,11 @@ resource "aws_iam_policy" "ci_boundary" {
   })
 }
 
+# ─── INFRA role ──────────────────────────────────────────────────────────────
+# Used ONLY by the rentlora-infra repo's terraform pipeline. Has broad AWS access
+# (AdministratorAccess) + EKS cluster-admin (granted in modules/eks) because
+# terraform must manage every resource and every Helm release in the cluster.
+# Trust is scoped to the infra repo only — the app repo cannot assume this.
 resource "aws_iam_role" "ci" {
   name                 = "${var.cluster_name}-ci"
   permissions_boundary = aws_iam_policy.ci_boundary.arn
@@ -143,9 +148,9 @@ resource "aws_iam_role" "ci" {
       Action    = "sts:AssumeRoleWithWebIdentity"
       Condition = {
         StringLike = {
-          # Org-wide: any repo under the org (rentlora, rentlora-infra, rentlora-helm)
-          # can assume this role via OIDC — the infra terraform workflow needs it too.
-          "token.actions.githubusercontent.com:sub" = "repo:${var.github_org}/*:*"
+          # Infra repo ONLY — the high-privilege role is not reachable from the
+          # high-churn app repo.
+          "token.actions.githubusercontent.com:sub" = "repo:${var.github_org}/${var.infra_repo}:*"
         }
         StringEquals = {
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
@@ -208,6 +213,63 @@ resource "aws_iam_role_policy" "ci" {
           "dynamodb:DeleteItem"
         ]
         Resource = "arn:aws:dynamodb:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:table/rentlora-terraform-locks"
+      }
+    ]
+  })
+}
+
+# ─── APP role ────────────────────────────────────────────────────────────────
+# Used ONLY by the rentlora application repo's build pipeline. The app flow is
+# pure GitOps: build image -> push to ECR -> bump the tag in rentlora-helm ->
+# ArgoCD deploys. So this role needs ECR push and NOTHING else — no AWS admin,
+# no Terraform state, and no Kubernetes access at all (it has no EKS access
+# entry). A compromised app build can push an image; it cannot touch the cluster
+# or read secrets. Trust is scoped to the app repo only.
+resource "aws_iam_role" "ci_app" {
+  name                 = "${var.cluster_name}-ci-app"
+  permissions_boundary = aws_iam_policy.ci_boundary.arn
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Federated = aws_iam_openid_connect_provider.github.arn }
+      Action    = "sts:AssumeRoleWithWebIdentity"
+      Condition = {
+        StringLike = {
+          "token.actions.githubusercontent.com:sub" = "repo:${var.github_org}/${var.github_repo}:*"
+        }
+        StringEquals = {
+          "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+        }
+      }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "ci_app" {
+  name = "ci-app-ecr-push"
+  role = aws_iam_role.ci_app.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["ecr:GetAuthorizationToken"]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+          "ecr:InitiateLayerUpload",
+          "ecr:UploadLayerPart",
+          "ecr:CompleteLayerUpload",
+          "ecr:PutImage"
+        ]
+        Resource = [for r in aws_ecr_repository.services : r.arn]
       }
     ]
   })

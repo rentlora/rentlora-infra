@@ -4,6 +4,10 @@ variable "github_org" {
 }
 variable "github_repo" {
   type    = string
-  default = "rentlora"
+  default = "rentlora" # the application repo (builds + pushes images)
+}
+variable "infra_repo" {
+  type    = string
+  default = "rentlora-infra" # the terraform/IaC repo
 }
 variable "cluster_name" { type = string }
