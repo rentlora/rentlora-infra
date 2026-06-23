@@ -1,0 +1,94 @@
+name: Terraform Drift
+
+# ── How AWS auth works ────────────────────────────────────────────────────────
+# OIDC, no static credentials. Each job mints a short-lived GitHub OIDC token,
+# aws-actions/configure-aws-credentials exchanges it with STS to assume
+# AWS_CI_ROLE_ARN. Requires id-token: write.
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Nightly drift detection across all stacks. A read-only `terraform plan` that
+# fails the job (and pings Slack) if real-world state has drifted from code.
+# Drift is never auto-corrected — re-apply via terraform-deploy.yml dispatch.
+
+on:
+  schedule:
+    - cron: "0 3 * * *"   # nightly at 3 AM UTC
+  workflow_dispatch: {}   # allow on-demand drift checks
+
+permissions:
+  id-token: write          # required for OIDC → AWS STS
+  contents: read
+
+concurrency:
+  group: tf-drift
+  cancel-in-progress: false
+
+env:
+  TF_VERSION: "1.8.0"
+  AWS_REGION: "us-east-1"
+
+jobs:
+
+  # terraform plan -detailed-exitcode: 0=no change, 1=error, 2=drift detected
+  drift:
+    name: Drift detect (${{ matrix.stack }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        stack: [cluster, dev, prod]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: AWS auth (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_CI_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: terraform init
+        run: terraform init
+        working-directory: stacks/${{ matrix.stack }}
+
+      - name: terraform plan (drift check)
+        id: drift
+        run: |
+          set +e
+          terraform plan -detailed-exitcode -no-color 2>&1 | tee plan.txt
+          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+        working-directory: stacks/${{ matrix.stack }}
+
+      - name: Write to job summary
+        if: always()
+        run: |
+          CODE="${{ steps.drift.outputs.exit_code }}"
+          echo "### Drift check — ${{ matrix.stack }}" >> "$GITHUB_STEP_SUMMARY"
+          if   [ "$CODE" = "0" ]; then echo "✅ No drift" >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$CODE" = "2" ]; then echo "⚠️ DRIFT DETECTED — run workflow_dispatch to re-apply" >> "$GITHUB_STEP_SUMMARY"
+          else                         echo "❌ Plan error" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo '```hcl' >> "$GITHUB_STEP_SUMMARY"
+          tail -c 60000 stacks/${{ matrix.stack }}/plan.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Notify drift or error
+        if: steps.drift.outputs.exit_code != '0'
+        uses: ./.github/actions/notify
+        with:
+          status: failure
+          title: "drift detected — ${{ matrix.stack }}"
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          details: >-
+            ${{ steps.drift.outputs.exit_code == '2' &&
+              'manual apply needed — run workflow_dispatch' ||
+              'plan error — check job logs' }}
+
+      - name: Fail on drift or plan error
+        if: steps.drift.outputs.exit_code != '0'
+        run: |
+          echo "Drift or plan error in ${{ matrix.stack }} stack (exit_code=${{ steps.drift.outputs.exit_code }})"
+          exit 1

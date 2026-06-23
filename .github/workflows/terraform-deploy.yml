@@ -1,0 +1,360 @@
+name: Terraform Deploy
+
+# ── How AWS auth works ────────────────────────────────────────────────────────
+# OIDC, no static credentials. Each job mints a short-lived GitHub OIDC token,
+# aws-actions/configure-aws-credentials exchanges it with STS to assume
+# AWS_CI_ROLE_ARN. Requires id-token: write.
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# This workflow APPLIES infrastructure. Triggers:
+#   • push to main      → plan + apply DEV only (auto, behind the dev env gate)
+#   • workflow_dispatch → plan + apply the SELECTED stack (cluster / dev / prod)
+#
+# Cluster and prod NEVER apply from a code push — dispatch only.
+#
+# Pattern for every stack:  plan-<stack> → apply-<stack> [environment gate]
+# The plan job uploads a binary tfplan artifact; the apply job downloads and
+# runs that EXACT plan (no re-plan). The environment gate fires between the two:
+# the approver reads the plan in the plan job summary, then approves.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      stack:
+        description: "Stack to plan and apply"
+        required: true
+        type: choice
+        options: [cluster, dev, prod]
+
+permissions:
+  id-token: write          # required for OIDC → AWS STS
+  contents: read
+
+# One run per stack; never cancel an apply mid-flight (don't stomp state).
+concurrency:
+  group: tf-apply-${{ inputs.stack || 'dev' }}
+  cancel-in-progress: false
+
+env:
+  TF_VERSION: "1.8.0"
+  AWS_REGION: "us-east-1"
+
+jobs:
+
+  # ─── Validate the stack being deployed ───────────────────────────────────
+  # For push → 'dev'. For dispatch → the selected stack.
+  validate:
+    name: Validate (${{ inputs.stack || 'dev' }})
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: AWS auth (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_CI_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: fmt check
+        run: terraform fmt -check -recursive
+        working-directory: stacks/${{ inputs.stack || 'dev' }}
+
+      - name: init (no backend — syntax check only)
+        run: terraform init -backend=false
+        working-directory: stacks/${{ inputs.stack || 'dev' }}
+
+      - name: validate
+        run: terraform validate
+        working-directory: stacks/${{ inputs.stack || 'dev' }}
+
+  # ─── CLUSTER — plan (workflow_dispatch ONLY) ─────────────────────────────
+  # Cluster is shared infra (VPC, EKS control plane); a mistake here breaks
+  # both dev and prod, so it never auto-applies from a code push.
+  plan-cluster:
+    name: Plan cluster
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && inputs.stack == 'cluster'
+    needs: validate
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: AWS auth (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_CI_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: terraform init
+        run: terraform init
+        working-directory: stacks/cluster
+
+      - name: terraform plan
+        run: |
+          set -o pipefail
+          terraform plan -no-color -out=tfplan 2>&1 | tee plan.txt
+        working-directory: stacks/cluster
+
+      - name: Write plan to job summary
+        if: always()
+        run: |
+          echo '### Terraform Plan — cluster' >> "$GITHUB_STEP_SUMMARY"
+          echo '```hcl' >> "$GITHUB_STEP_SUMMARY"
+          tail -c 60000 stacks/cluster/plan.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-cluster-${{ github.run_id }}
+          path: stacks/cluster/tfplan
+          retention-days: 1
+
+  # ─── CLUSTER — apply (environment gate fires here) ───────────────────────
+  apply-cluster:
+    name: Apply cluster
+    runs-on: ubuntu-latest
+    needs: plan-cluster
+    environment: cluster
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: AWS auth (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_CI_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: terraform init
+        run: terraform init
+        working-directory: stacks/cluster
+
+      - name: Download reviewed plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-cluster-${{ github.run_id }}
+          path: stacks/cluster
+
+      - name: terraform apply (exact reviewed plan)
+        run: terraform apply tfplan
+        working-directory: stacks/cluster
+
+      - name: Notify success
+        if: success()
+        uses: ./.github/actions/notify
+        with:
+          status: success
+          title: "cluster apply succeeded"
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          details: "triggered by ${{ github.actor }}"
+
+      - name: Notify failure
+        if: failure()
+        uses: ./.github/actions/notify
+        with:
+          status: failure
+          title: "cluster apply FAILED"
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          details: "triggered by ${{ github.actor }}"
+
+  # ─── DEV — plan (auto on push to main OR workflow_dispatch dev) ───────────
+  plan-dev:
+    name: Plan dev
+    runs-on: ubuntu-latest
+    needs: validate
+    if: |
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && inputs.stack == 'dev')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: AWS auth (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_CI_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: terraform init
+        run: terraform init
+        working-directory: stacks/dev
+
+      - name: terraform plan
+        run: |
+          set -o pipefail
+          terraform plan -no-color -out=tfplan 2>&1 | tee plan.txt
+        working-directory: stacks/dev
+
+      - name: Write plan to job summary
+        if: always()
+        run: |
+          echo '### Terraform Plan — dev' >> "$GITHUB_STEP_SUMMARY"
+          echo '```hcl' >> "$GITHUB_STEP_SUMMARY"
+          tail -c 60000 stacks/dev/plan.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-dev-${{ github.run_id }}
+          path: stacks/dev/tfplan
+          retention-days: 1
+
+  # ─── DEV — apply (environment gate fires here) ───────────────────────────
+  apply-dev:
+    name: Apply dev
+    runs-on: ubuntu-latest
+    needs: plan-dev
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: AWS auth (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_CI_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: terraform init
+        run: terraform init
+        working-directory: stacks/dev
+
+      - name: Download reviewed plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-dev-${{ github.run_id }}
+          path: stacks/dev
+
+      - name: terraform apply (exact reviewed plan)
+        run: terraform apply tfplan
+        working-directory: stacks/dev
+
+      - name: Notify success
+        if: success()
+        uses: ./.github/actions/notify
+        with:
+          status: success
+          title: "dev apply succeeded"
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          details: "commit ${{ github.sha }}"
+
+      - name: Notify failure
+        if: failure()
+        uses: ./.github/actions/notify
+        with:
+          status: failure
+          title: "dev apply FAILED"
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          details: "commit ${{ github.sha }}"
+
+  # ─── PROD — plan (workflow_dispatch ONLY — never auto) ───────────────────
+  plan-prod:
+    name: Plan prod
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && inputs.stack == 'prod'
+    needs: validate
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: AWS auth (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_CI_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: terraform init
+        run: terraform init
+        working-directory: stacks/prod
+
+      - name: terraform plan
+        run: |
+          set -o pipefail
+          terraform plan -no-color -out=tfplan 2>&1 | tee plan.txt
+        working-directory: stacks/prod
+
+      - name: Write plan to job summary
+        if: always()
+        run: |
+          echo '### Terraform Plan — prod' >> "$GITHUB_STEP_SUMMARY"
+          echo '```hcl' >> "$GITHUB_STEP_SUMMARY"
+          tail -c 60000 stacks/prod/plan.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-prod-${{ github.run_id }}
+          path: stacks/prod/tfplan
+          retention-days: 1
+
+  # ─── PROD — apply (environment gate + required reviewers) ────────────────
+  apply-prod:
+    name: Apply prod
+    runs-on: ubuntu-latest
+    needs: plan-prod
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: AWS auth (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_CI_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: terraform init
+        run: terraform init
+        working-directory: stacks/prod
+
+      - name: Download reviewed plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-prod-${{ github.run_id }}
+          path: stacks/prod
+
+      - name: terraform apply (exact reviewed plan)
+        run: terraform apply tfplan
+        working-directory: stacks/prod
+
+      - name: Notify success
+        if: success()
+        uses: ./.github/actions/notify
+        with:
+          status: success
+          title: "prod apply succeeded"
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          details: "triggered by ${{ github.actor }}"
+
+      - name: Notify failure
+        if: failure()
+        uses: ./.github/actions/notify
+        with:
+          status: failure
+          title: "prod apply FAILED"
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          details: "triggered by ${{ github.actor }}"
