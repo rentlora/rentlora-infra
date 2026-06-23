@@ -33,6 +33,15 @@ module "backup" {
   name   = var.cluster_name
 }
 
+module "waf_cloudfront" {
+  source             = "../../modules/waf-cloudfront"
+  domain_name        = var.domain_name
+  origin_domain      = "origin.${var.domain_name}"
+  acm_cert_arn       = module.dns_tls.acm_cert_arn
+  route53_zone_id    = module.dns_tls.zone_id
+  enable_dns_cutover = var.enable_cloudfront_cutover
+}
+
 module "ecr" {
   source       = "../../modules/ecr"
   cluster_name = var.cluster_name

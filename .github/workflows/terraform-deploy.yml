@@ -84,19 +84,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: ./.github/actions/tf-setup
         with:
-          terraform_version: ${{ env.TF_VERSION }}
-
-      - name: AWS auth (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_CI_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: terraform init
-        run: terraform init
-        working-directory: stacks/cluster
+          stack: cluster
+          aws-role-arn: ${{ secrets.AWS_CI_ROLE_ARN }}
 
       - name: terraform plan
         run: |
@@ -127,19 +118,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: ./.github/actions/tf-setup
         with:
-          terraform_version: ${{ env.TF_VERSION }}
-
-      - name: AWS auth (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_CI_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: terraform init
-        run: terraform init
-        working-directory: stacks/cluster
+          stack: cluster
+          aws-role-arn: ${{ secrets.AWS_CI_ROLE_ARN }}
 
       - name: Download reviewed plan
         uses: actions/download-artifact@v4
@@ -180,19 +162,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: ./.github/actions/tf-setup
         with:
-          terraform_version: ${{ env.TF_VERSION }}
-
-      - name: AWS auth (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_CI_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: terraform init
-        run: terraform init
-        working-directory: stacks/dev
+          stack: dev
+          aws-role-arn: ${{ secrets.AWS_CI_ROLE_ARN }}
 
       - name: terraform plan
         run: |
@@ -223,19 +196,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: ./.github/actions/tf-setup
         with:
-          terraform_version: ${{ env.TF_VERSION }}
-
-      - name: AWS auth (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_CI_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: terraform init
-        run: terraform init
-        working-directory: stacks/dev
+          stack: dev
+          aws-role-arn: ${{ secrets.AWS_CI_ROLE_ARN }}
 
       - name: Download reviewed plan
         uses: actions/download-artifact@v4
@@ -274,19 +238,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: ./.github/actions/tf-setup
         with:
-          terraform_version: ${{ env.TF_VERSION }}
-
-      - name: AWS auth (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_CI_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: terraform init
-        run: terraform init
-        working-directory: stacks/prod
+          stack: prod
+          aws-role-arn: ${{ secrets.AWS_CI_ROLE_ARN }}
 
       - name: terraform plan
         run: |
@@ -317,19 +272,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: ./.github/actions/tf-setup
         with:
-          terraform_version: ${{ env.TF_VERSION }}
-
-      - name: AWS auth (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_CI_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: terraform init
-        run: terraform init
-        working-directory: stacks/prod
+          stack: prod
+          aws-role-arn: ${{ secrets.AWS_CI_ROLE_ARN }}
 
       - name: Download reviewed plan
         uses: actions/download-artifact@v4
