@@ -15,12 +15,14 @@ locals {
 }
 
 module "rds" {
-  source               = "../../modules/rds"
-  env                  = local.env
-  db_subnet_group_name = local.cluster.db_subnet_group_name
-  vpc_id               = local.cluster.vpc_id
-  deletion_protection  = var.deletion_protection
-  skip_final_snapshot  = var.skip_final_snapshot
+  source                  = "../../modules/rds"
+  env                     = local.env
+  db_subnet_group_name    = local.cluster.db_subnet_group_name
+  vpc_id                  = local.cluster.vpc_id
+  deletion_protection     = var.deletion_protection
+  skip_final_snapshot     = var.skip_final_snapshot
+  backup_retention_period = 1     # dev: 1 day of PITR is enough
+  multi_az                = false # dev: single-AZ (cost)
 }
 
 module "sqs" {

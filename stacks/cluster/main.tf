@@ -23,6 +23,16 @@ module "alarms" {
   alert_email  = var.alert_email
 }
 
+module "budgets" {
+  source      = "../../modules/budgets"
+  alert_email = var.alert_email
+}
+
+module "backup" {
+  source = "../../modules/backup"
+  name   = var.cluster_name
+}
+
 module "ecr" {
   source       = "../../modules/ecr"
   cluster_name = var.cluster_name

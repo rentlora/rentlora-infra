@@ -15,12 +15,14 @@ locals {
 }
 
 module "rds" {
-  source               = "../../modules/rds"
-  env                  = local.env
-  db_subnet_group_name = local.cluster.db_subnet_group_name
-  vpc_id               = local.cluster.vpc_id
-  deletion_protection  = var.deletion_protection
-  skip_final_snapshot  = var.skip_final_snapshot
+  source                  = "../../modules/rds"
+  env                     = local.env
+  db_subnet_group_name    = local.cluster.db_subnet_group_name
+  vpc_id                  = local.cluster.vpc_id
+  deletion_protection     = var.deletion_protection
+  skip_final_snapshot     = var.skip_final_snapshot
+  backup_retention_period = 7    # prod: 7 days of point-in-time recovery
+  multi_az                = true # prod: synchronous standby for auto-failover
 }
 
 module "sqs" {

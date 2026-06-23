@@ -39,11 +39,17 @@ resource "aws_db_instance" "postgres" {
   vpc_security_group_ids = [aws_security_group.rds.id]
   publicly_accessible    = false
 
-  multi_az                  = false
-  backup_retention_period   = 0 # Free Plan caps backups; 0 = no automated backups (raise after upgrading to a paid plan)
+  multi_az                  = var.multi_az
+  backup_retention_period   = var.backup_retention_period # >0 enables automated daily backups + point-in-time recovery
+  apply_immediately         = true                        # apply changes now, not at the next maintenance window
   deletion_protection       = var.deletion_protection
   skip_final_snapshot       = var.skip_final_snapshot
   final_snapshot_identifier = var.skip_final_snapshot ? null : "rentlora-${var.env}-final"
+
+  # Picked up by the AWS Backup selection (central backup plan, cluster stack).
+  tags = {
+    "backup-plan" = "rentlora-daily"
+  }
 }
 
 resource "aws_secretsmanager_secret" "db_password" {

@@ -4,6 +4,14 @@ resource "aws_s3_bucket" "images" {
   bucket = "rentlora-${var.env}-property-images"
 }
 
+# Versioning = recover from accidental overwrite/delete of property images (DR).
+resource "aws_s3_bucket_versioning" "images" {
+  bucket = aws_s3_bucket.images.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
 resource "aws_s3_bucket_public_access_block" "images" {
   bucket                  = aws_s3_bucket.images.id
   block_public_acls       = true
