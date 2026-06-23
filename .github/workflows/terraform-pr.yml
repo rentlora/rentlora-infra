@@ -75,7 +75,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Trivy — upload findings to Security tab
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.35.0
         with:
           scan-type: config
           scan-ref: .
@@ -89,7 +89,7 @@ jobs:
           sarif_file: trivy-iac.sarif
 
       - name: Trivy — gate (fails PR on HIGH/CRITICAL)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.35.0
         with:
           scan-type: config
           scan-ref: .
@@ -141,16 +141,32 @@ jobs:
           header: plan-${{ matrix.stack }}
           path: comment.md
 
+      # Cost estimate — informational only (continue-on-error so a cost-tooling
+      # hiccup never blocks an infra merge). Only runs when the plan succeeded.
       - name: Setup Infracost
+        if: steps.plan.outcome == 'success'
         uses: infracost/actions/setup@v3
         with:
           api-key: ${{ secrets.INFRACOST_API_KEY }}
 
+      # `infracost comment` needs an Infracost-generated JSON, not a raw
+      # `terraform show -json`. Generate it from the plan json first.
+      - name: Infracost breakdown
+        if: steps.plan.outcome == 'success'
+        continue-on-error: true
+        run: |
+          infracost breakdown \
+            --path stacks/${{ matrix.stack }}/plan.json \
+            --format json \
+            --out-file infracost.json
+
       - name: Post Infracost PR comment
+        if: steps.plan.outcome == 'success'
+        continue-on-error: true
         run: |
           infracost comment github \
-            --path stacks/${{ matrix.stack }}/plan.json \
-            --repo $GITHUB_REPOSITORY \
+            --path infracost.json \
+            --repo "$GITHUB_REPOSITORY" \
             --github-token ${{ secrets.GITHUB_TOKEN }} \
             --pull-request ${{ github.event.pull_request.number }} \
             --behavior update \
