@@ -57,8 +57,13 @@ module "eks" {
     }
   }
 
-  # Allow Karpenter nodes to join the cluster
-  enable_cluster_creator_admin_permissions = true
+  # IMPORTANT: keep this false. When true, the upstream module grants cluster-admin
+  # to whoever runs `terraform apply` (the "cluster creator"). Since applies run as
+  # the CI role in the pipeline, it (a) collides with the explicit CI access entry
+  # below for the same principal, and (b) flips the creator entry to the CI role,
+  # silently revoking the human operator's access. Admins are granted explicitly
+  # via the access_entries below instead — deterministic, no matter who applies.
+  enable_cluster_creator_admin_permissions = false
 
   # Grant the GitHub Actions CI role cluster-admin. The same role runs the infra
   # pipeline's `terraform apply` on this cluster stack, which manages Helm releases
@@ -73,6 +78,19 @@ module "eks" {
   # an infra role (cluster-admin) and an app role (edit, app namespaces only). See
   # the follow-up task to separate them.
   access_entries = {
+    # Human operator(s) — cluster-admin for kubectl. Explicit so it never depends
+    # on who ran the last apply.
+    admin = {
+      principal_arn = var.admin_principal_arn
+      policy_associations = {
+        admin = {
+          policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+          access_scope = {
+            type = "cluster"
+          }
+        }
+      }
+    }
     ci = {
       principal_arn = var.ci_role_arn
       policy_associations = {
