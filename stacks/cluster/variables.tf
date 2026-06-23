@@ -23,6 +23,10 @@ variable "alert_email" {
   type        = string
   description = "Email that receives CloudWatch alarm notifications (must be confirmed after apply)."
 }
+variable "admin_principal_arn" {
+  type        = string
+  description = "IAM principal (human operator) granted an explicit EKS cluster-admin access entry for kubectl."
+}
 variable "enable_cloudfront_cutover" {
   type        = bool
   default     = false
