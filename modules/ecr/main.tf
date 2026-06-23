@@ -270,6 +270,14 @@ resource "aws_iam_role_policy" "ci_app" {
           "ecr:PutImage"
         ]
         Resource = [for r in aws_ecr_repository.services : r.arn]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:DescribeImages",
+          "ecr:DescribeImageScanFindings"
+        ]
+        Resource = [for r in aws_ecr_repository.services : r.arn]
       }
     ]
   })

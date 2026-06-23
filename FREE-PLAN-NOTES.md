@@ -68,6 +68,6 @@ match it here:
   instead of gating your config.
 
 ## 5. Revert checklist (after upgrading to paid)
-- [ ] `modules/rds/main.tf`: `backup_retention_period` → `7`
+- [x] `modules/rds/main.tf`: `backup_retention_period` → `7` (done — stacks/prod uses `7`, stacks/dev uses `1`)
 - [ ] (optional) dev off spot / replicas back to 2 if you want dev HA
 - [ ] (optional) Multi-AZ RDS for prod, Performance Insights, longer backups
