@@ -1,5 +1,5 @@
 name: "Terraform Setup"
-description: "Checks out code, sets up Terraform, configures AWS OIDC auth, and initializes the given stack"
+description: "Sets up Terraform, configures AWS OIDC auth, and initializes the given stack. Assumes the repo is already checked out by the caller."
 
 inputs:
   stack:
@@ -8,21 +8,29 @@ inputs:
   aws-role-arn:
     description: "The IAM Role ARN to assume via OIDC"
     required: true
+  terraform-version:
+    description: "Terraform version to install"
+    required: false
+    default: "1.8.0"
+  aws-region:
+    description: "AWS region"
+    required: false
+    default: "us-east-1"
 
 runs:
   using: "composite"
   steps:
-    - uses: actions/checkout@v4
-
+    # NOTE: no checkout here — the caller must check out first (a local action
+    # reference like ./.github/actions/tf-setup requires the repo on disk already).
     - uses: hashicorp/setup-terraform@v3
       with:
-        terraform_version: "1.8.0"
+        terraform_version: ${{ inputs.terraform-version }}
 
     - name: AWS auth (OIDC)
       uses: aws-actions/configure-aws-credentials@v4
       with:
         role-to-assume: ${{ inputs.aws-role-arn }}
-        aws-region: "us-east-1"
+        aws-region: ${{ inputs.aws-region }}
 
     - name: terraform init
       run: terraform init
