@@ -23,3 +23,8 @@ variable "alert_email" {
   type        = string
   description = "Email that receives CloudWatch alarm notifications (must be confirmed after apply)."
 }
+variable "enable_cloudfront_cutover" {
+  type        = bool
+  default     = false
+  description = "Flip to true only after the CloudFront distribution is Deployed + verified — points rentlora.in at CloudFront."
+}

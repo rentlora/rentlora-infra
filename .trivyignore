@@ -1,3 +1,15 @@
 # Accepted Trivy IaC findings. Add one rule ID per line with a justification.
 # Example:
 # AVD-AWS-0057  # CloudWatch log retention left to default for dev cost reasons
+
+# EKS API endpoint is publicly reachable. Required: the GitHub Actions CI role
+# (terraform + kubectl via the addons/helm providers) reaches the cluster API
+# over the public internet — there is no self-hosted runner in the VPC. Private
+# endpoint would break the pipeline. Revisit if/when runners move into the VPC.
+AVD-AWS-0040  # EKS public cluster access enabled — needed for GitHub-hosted CI
+AVD-AWS-0041  # EKS public access CIDR 0.0.0.0/0 — GitHub runner IPs are dynamic
+
+# Unrestricted egress (0.0.0.0/0) on security groups. Standard for nodes/NLB that
+# must reach AWS APIs, ECR, and the internet; egress filtering is not part of this
+# project's threat model.
+AVD-AWS-0104  # Unrestricted egress — accepted default for cluster/NLB SGs

@@ -1,0 +1,30 @@
+name: "Terraform Setup"
+description: "Checks out code, sets up Terraform, configures AWS OIDC auth, and initializes the given stack"
+
+inputs:
+  stack:
+    description: "The stack directory (e.g., dev, prod, cluster)"
+    required: true
+  aws-role-arn:
+    description: "The IAM Role ARN to assume via OIDC"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/checkout@v4
+
+    - uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: "1.8.0"
+
+    - name: AWS auth (OIDC)
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ inputs.aws-role-arn }}
+        aws-region: "us-east-1"
+
+    - name: terraform init
+      run: terraform init
+      working-directory: stacks/${{ inputs.stack }}
+      shell: bash

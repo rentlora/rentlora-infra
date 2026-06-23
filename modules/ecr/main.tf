@@ -89,9 +89,9 @@ resource "aws_iam_policy" "ci_boundary" {
       },
       {
         # Block creating IAM users — prevents backdoor static credentials
-        Sid      = "DenyIAMUsers"
-        Effect   = "Deny"
-        Action   = [
+        Sid    = "DenyIAMUsers"
+        Effect = "Deny"
+        Action = [
           "iam:CreateUser",
           "iam:CreateAccessKey",
           "iam:AttachUserPolicy",
