@@ -8,6 +8,8 @@ locals {
     "ai-search-service",
     "user-service",
   ]
+
+  boundary_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/rentlora-ci-boundary"
 }
 
 data "aws_caller_identity" "current" {}
@@ -65,8 +67,73 @@ resource "aws_iam_openid_connect_provider" "github" {
   thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
 }
 
+# ─── Permission boundary ─────────────────────────────────────────────────────
+# Prevents privilege escalation from a compromised pipeline:
+#   - CI role can do anything needed for terraform plan/apply
+#   - CI role CANNOT create IAM users (no backdoor static credentials)
+#   - CI role CANNOT create IAM roles without the same boundary applied
+#     (so any role it creates is equally constrained)
+#   - CI role CANNOT remove its own boundary or another role's boundary
+resource "aws_iam_policy" "ci_boundary" {
+  name        = "rentlora-ci-boundary"
+  description = "Permission boundary for rentlora-eks-ci — prevents IAM privilege escalation"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "AllowAllServices"
+        Effect   = "Allow"
+        Action   = ["*"]
+        Resource = "*"
+      },
+      {
+        # Block creating IAM users — prevents backdoor static credentials
+        Sid      = "DenyIAMUsers"
+        Effect   = "Deny"
+        Action   = [
+          "iam:CreateUser",
+          "iam:CreateAccessKey",
+          "iam:AttachUserPolicy",
+          "iam:PutUserPolicy",
+          "iam:CreateLoginProfile"
+        ]
+        Resource = "*"
+      },
+      {
+        # Block creating roles WITHOUT the same boundary — prevents escape hatch
+        Sid      = "DenyCreateRoleWithoutBoundary"
+        Effect   = "Deny"
+        Action   = ["iam:CreateRole"]
+        Resource = "*"
+        Condition = {
+          StringNotEquals = {
+            "iam:PermissionsBoundary" = local.boundary_arn
+          }
+        }
+      },
+      {
+        # Block removing or replacing the boundary on any role
+        Sid    = "DenyBoundaryModification"
+        Effect = "Deny"
+        Action = [
+          "iam:DeleteRolePermissionsBoundary",
+          "iam:PutRolePermissionsBoundary"
+        ]
+        Resource = "*"
+        Condition = {
+          StringNotEquals = {
+            "iam:PermissionsBoundary" = local.boundary_arn
+          }
+        }
+      }
+    ]
+  })
+}
+
 resource "aws_iam_role" "ci" {
-  name = "${var.cluster_name}-ci"
+  name                 = "${var.cluster_name}-ci"
+  permissions_boundary = aws_iam_policy.ci_boundary.arn
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -88,9 +155,7 @@ resource "aws_iam_role" "ci" {
   })
 }
 
-# Terraform CI needs full access to plan/apply all managed resources.
-# Scoped down below to ECR/EKS/S3-state/DynamoDB; AdministratorAccess
-# covers everything else (RDS, SQS, SecretsManager, CloudFront, IAM, etc.).
+# AdministratorAccess + boundary = full terraform access, no privilege escalation
 resource "aws_iam_role_policy_attachment" "ci_admin" {
   role       = aws_iam_role.ci.name
   policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
@@ -103,10 +168,8 @@ resource "aws_iam_role_policy" "ci" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect = "Allow"
-        Action = [
-          "ecr:GetAuthorizationToken"
-        ]
+        Effect   = "Allow"
+        Action   = ["ecr:GetAuthorizationToken"]
         Resource = "*"
       },
       {
@@ -127,14 +190,9 @@ resource "aws_iam_role_policy" "ci" {
         Action   = ["eks:DescribeCluster"]
         Resource = "arn:aws:eks:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:cluster/*"
       },
-      # Terraform state backend — S3 read/write + DynamoDB locking
       {
-        Effect = "Allow"
-        Action = [
-          "s3:GetObject",
-          "s3:PutObject",
-          "s3:DeleteObject"
-        ]
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
         Resource = "arn:aws:s3:::rentlora-terraform-state/*"
       },
       {
