@@ -88,6 +88,14 @@ resource "aws_iam_role" "ci" {
   })
 }
 
+# Terraform CI needs full access to plan/apply all managed resources.
+# Scoped down below to ECR/EKS/S3-state/DynamoDB; AdministratorAccess
+# covers everything else (RDS, SQS, SecretsManager, CloudFront, IAM, etc.).
+resource "aws_iam_role_policy_attachment" "ci_admin" {
+  role       = aws_iam_role.ci.name
+  policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
+}
+
 resource "aws_iam_role_policy" "ci" {
   name = "ci-policy"
   role = aws_iam_role.ci.id
