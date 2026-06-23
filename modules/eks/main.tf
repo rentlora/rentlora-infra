@@ -60,18 +60,26 @@ module "eks" {
   # Allow Karpenter nodes to join the cluster
   enable_cluster_creator_admin_permissions = true
 
-  # Grant the GitHub Actions CI role read access to the app namespaces so the
-  # deploy workflow can run `kubectl rollout status`. View policy covers
-  # get/list/watch on deployments/replicasets/pods — enough for verification.
+  # Grant the GitHub Actions CI role cluster-admin. The same role runs the infra
+  # pipeline's `terraform apply` on this cluster stack, which manages Helm releases
+  # (Karpenter, kgateway, ArgoCD, AWS LB controller, external-dns, metrics-server).
+  # Those charts create cluster-scoped objects — CRDs, ClusterRoles, webhooks — so
+  # namespace-scoped access is insufficient; cluster-admin is required. Helm also
+  # stores release state as Secrets in the system namespaces, which the provider
+  # must list on every plan/refresh.
+  #
+  # NOTE (least privilege): this is the single org-wide CI role, so the app-deploy
+  # pipeline inherits cluster-admin too. The cleaner long-term split is two roles —
+  # an infra role (cluster-admin) and an app role (edit, app namespaces only). See
+  # the follow-up task to separate them.
   access_entries = {
     ci = {
       principal_arn = var.ci_role_arn
       policy_associations = {
-        view = {
-          policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSViewPolicy"
+        admin = {
+          policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
           access_scope = {
-            type       = "namespace"
-            namespaces = ["rentlora-dev", "production"]
+            type = "cluster"
           }
         }
       }
